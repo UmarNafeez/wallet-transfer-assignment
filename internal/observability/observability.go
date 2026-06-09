@@ -13,12 +13,13 @@ import (
 const correlationHeader = "X-Correlation-ID"
 
 type Metrics struct {
-	registry         *prometheus.Registry
-	requestCount     *prometheus.CounterVec
-	requestDuration  *prometheus.HistogramVec
-	errorCount       *prometheus.CounterVec
-	transferDuration prometheus.Histogram
-	idempotencyHit   prometheus.Counter
+	registry           *prometheus.Registry
+	requestCount       *prometheus.CounterVec
+	requestDuration    *prometheus.HistogramVec
+	errorCount         *prometheus.CounterVec
+	transferDuration   prometheus.Histogram
+	idempotencyHit     prometheus.Counter
+	idempotencyPending prometheus.Gauge
 }
 
 func NewMetrics(registry *prometheus.Registry) *Metrics {
@@ -63,6 +64,12 @@ func NewMetrics(registry *prometheus.Registry) *Metrics {
 				Help: "Total number of idempotency hits for duplicate transfer requests.",
 			},
 		),
+		idempotencyPending: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "wallet_transfer_idempotency_pending",
+				Help: "Current number of PENDING idempotency records (stale claims should be monitored).",
+			},
+		),
 	}
 
 	registry.MustRegister(
@@ -71,6 +78,7 @@ func NewMetrics(registry *prometheus.Registry) *Metrics {
 		m.errorCount,
 		m.transferDuration,
 		m.idempotencyHit,
+		m.idempotencyPending,
 	)
 
 	return m
@@ -120,6 +128,13 @@ func (m *Metrics) IncIdempotencyHit() {
 		return
 	}
 	m.idempotencyHit.Inc()
+}
+
+func (m *Metrics) SetIdempotencyPending(n int) {
+	if m == nil {
+		return
+	}
+	m.idempotencyPending.Set(float64(n))
 }
 
 func HTTPMiddleware(logger *slog.Logger, metrics *Metrics) func(http.Handler) http.Handler {

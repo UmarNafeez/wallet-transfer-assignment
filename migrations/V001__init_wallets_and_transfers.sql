@@ -132,8 +132,9 @@ CREATE TABLE transfers (
 
     -- Idempotency Key: Unique request identifier
     -- Enables idempotent API calls; safe to retry
-    idempotency_key TEXT NOT NULL UNIQUE
-        CONSTRAINT chk_idempotency_key_not_empty CHECK (idempotency_key <> ''),
+    idempotency_key TEXT NOT NULL
+        CONSTRAINT chk_idempotency_key_not_empty CHECK (length(idempotency_key) > 0),
+    CONSTRAINT uq_transfers_idempotency_key UNIQUE (idempotency_key),
 
     -- Wallet References
     from_wallet_id UUID NOT NULL REFERENCES wallets(id)
@@ -150,7 +151,7 @@ CREATE TABLE transfers (
 
     -- Failure Reason: Optional explanation if status = FAILED
     failure_reason TEXT
-        CONSTRAINT chk_failure_reason_not_empty CHECK (failure_reason <> ''),
+        CONSTRAINT chk_failure_reason_not_empty CHECK (failure_reason IS NULL OR length(failure_reason) > 0),
 
     -- Audit Columns
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -175,8 +176,8 @@ CREATE INDEX idx_transfer_to_wallet
     ON transfers(to_wallet_id)
     WHERE status = 'PROCESSED';
 
-CREATE INDEX idx_transfer_idempotency_key
-    ON transfers(idempotency_key);  -- For fast lookup during retry/dedup
+-- Index already exists on idempotency_key via UNIQUE constraint
+-- Additional non-unique index not needed
 
 CREATE INDEX idx_transfer_created_at
     ON transfers(created_at DESC);  -- For time-range queries
@@ -196,14 +197,15 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+IMMUTABLE;
 
-CREATE TRIGGER wallets_updated_at_trigger
+CREATE TRIGGER trg_wallets_updated_at
     BEFORE UPDATE ON wallets
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER transfers_updated_at_trigger
+CREATE TRIGGER trg_transfers_updated_at
     BEFORE UPDATE ON transfers
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();

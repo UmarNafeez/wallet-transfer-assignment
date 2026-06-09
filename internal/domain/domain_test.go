@@ -137,8 +137,8 @@ func TestLedgerEntryValidation(t *testing.T) {
 
 func TestValidateLedgerEntries(t *testing.T) {
 	entries := []LedgerEntry{
-		{TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
-		{TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeCredit, Amount: 100},
+		{ID: "le1", TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
+		{ID: "le2", TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeCredit, Amount: 100},
 	}
 
 	if err := ValidateLedgerEntries(entries); err != nil {
@@ -146,24 +146,24 @@ func TestValidateLedgerEntries(t *testing.T) {
 	}
 
 	invalidEntries := []LedgerEntry{
-		{TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
-		{TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeDebit, Amount: 100},
+		{ID: "le1", TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
+		{ID: "le2", TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeDebit, Amount: 100},
 	}
 	if err := ValidateLedgerEntries(invalidEntries); err == nil {
 		t.Fatal("expected error for duplicate entry types")
 	}
 
 	mismatchedAmount := []LedgerEntry{
-		{TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
-		{TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeCredit, Amount: 50},
+		{ID: "le1", TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
+		{ID: "le2", TransferID: "t1", WalletID: "w2", EntryType: LedgerEntryTypeCredit, Amount: 50},
 	}
 	if err := ValidateLedgerEntries(mismatchedAmount); err == nil {
 		t.Fatal("expected error for mismatched ledger amounts")
 	}
 
 	sameWallet := []LedgerEntry{
-		{TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
-		{TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeCredit, Amount: 100},
+		{ID: "le1", TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeDebit, Amount: 100},
+		{ID: "le2", TransferID: "t1", WalletID: "w1", EntryType: LedgerEntryTypeCredit, Amount: 100},
 	}
 	if err := ValidateLedgerEntries(sameWallet); err == nil {
 		t.Fatal("expected error for entries using same wallet")

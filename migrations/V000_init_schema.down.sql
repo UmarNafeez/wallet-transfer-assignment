@@ -4,9 +4,9 @@
 
 BEGIN;
 
-DROP TABLE IF EXISTS idempotency_records;
-DROP TABLE IF EXISTS ledger_entries;
-DROP TABLE IF EXISTS transfers;
-DROP TABLE IF EXISTS wallets;
+DROP TABLE IF EXISTS idempotency_records CASCADE;
+DROP TABLE IF EXISTS ledger_entries CASCADE;
+DROP TABLE IF EXISTS transfers CASCADE;
+DROP TABLE IF EXISTS wallets CASCADE;
 
 COMMIT;

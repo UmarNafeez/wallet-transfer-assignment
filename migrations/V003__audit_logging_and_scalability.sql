@@ -25,7 +25,8 @@ CREATE TABLE audit_log (
 
     -- Operation: INSERT, UPDATE, DELETE
     operation TEXT NOT NULL
-        CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
+        CONSTRAINT chk_audit_operation_valid
+            CHECK (operation IN ('INSERT', 'UPDATE', 'DELETE')),
 
     -- Who made the change (application user/service)
     changed_by TEXT,
@@ -40,8 +41,8 @@ CREATE TABLE audit_log (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Audit trail is immutable (marked at insert)
-    CONSTRAINT chk_audit_immutable
-        CHECK (changed_at <= NOW())
+    -- Note: Check constraints cannot reference functions like NOW() in all DB versions
+    -- This constraint is informational; enforcement is via application logic or trigger
 );
 
 -- Indexes for audit queries
@@ -194,10 +195,7 @@ ALTER TABLE transfers SET (parallel_workers = 4);
 -- Optional: Implement row-level security (RLS)
 
 -- Create roles for different access levels
--- DO NOT apply in single-tenant system; for multi-tenant add:
-
--- CREATE ROLE app_user WITH LOGIN;
--- CREATE ROLE admin_user WITH LOGIN;
+-- For multi-tenant deployments, consider implementing Row Level Security (RLS)
 -- 
 -- GRANT SELECT, INSERT, UPDATE ON wallets, transfers, ledger_entries
 --    TO app_user;

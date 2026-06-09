@@ -19,6 +19,15 @@ var (
 	ErrLedgerEntryAmountMismatch = errors.New("ledger entries must have matching amounts")
 )
 
+// Metrics defines the interface for collecting system metrics.
+type Metrics interface {
+	IncRequest(method, route string, status int)
+	ObserveRequestDuration(method, route string, seconds float64)
+	IncError(operation string)
+	ObserveTransferDuration(seconds float64)
+	IncIdempotencyHit()
+}
+
 // TransferStatus represents the lifecycle status of a transfer.
 type TransferStatus string
 
@@ -159,6 +168,8 @@ func (t *Transfer) Validate() error {
 	if t.FromWalletID == t.ToWalletID {
 		return ErrSameWalletIDs
 	}
+	// Staff Suggestion: Validate UUID format if applicable to prevent
+	// SQL injection or malformed business keys early.
 	if t.Amount <= 0 {
 		return ErrInvalidAmount
 	}
@@ -233,30 +244,33 @@ func ValidateLedgerEntries(entries []LedgerEntry) error {
 		return ErrInvalidLedgerEntries
 	}
 
-	left, right := entries[0], entries[1]
-	if left.TransferID == "" || right.TransferID == "" || left.TransferID != right.TransferID {
+	left, right := entries[0], entries[1] // +1
+
+	// Validate individual entries first
+	if err := left.Validate(); err != nil { // +1
+		return err
+	}
+	if err := right.Validate(); err != nil { // +1
+		return err
+	}
+
+	// Cross-entry validations
+	// All individual fields (ID, TransferID, WalletID, EntryType, Amount) are validated to be non-empty/positive by left.Validate() and right.Validate()
+	// Now check relationships between the two entries.
+
+	if left.TransferID != right.TransferID { // +1
 		return ErrInvalidLedgerEntries
 	}
-	if left.WalletID == "" || right.WalletID == "" {
-		return ErrInvalidLedgerEntries
-	}
-	if left.WalletID == right.WalletID {
+	if left.WalletID == right.WalletID { // +1
 		return ErrLedgerEntrySameWalletID
 	}
-	if !left.EntryType.IsValid() || !right.EntryType.IsValid() {
-		return ErrInvalidLedgerEntryType
-	}
-	if left.Amount <= 0 || right.Amount <= 0 {
-		return ErrInvalidAmount
-	}
-	if left.Amount != right.Amount {
+	if left.Amount != right.Amount { // +1
 		return ErrLedgerEntryAmountMismatch
 	}
-	if left.EntryType == right.EntryType {
-		return ErrInvalidLedgerEntries
-	}
-	if (left.EntryType == LedgerEntryTypeDebit && right.EntryType != LedgerEntryTypeCredit) ||
-		(left.EntryType == LedgerEntryTypeCredit && right.EntryType != LedgerEntryTypeDebit) {
+
+	// Ensure one is DEBIT and the other is CREDIT
+	if !((left.EntryType == LedgerEntryTypeDebit && right.EntryType == LedgerEntryTypeCredit) || // +3 (&&, ||, &&)
+		(left.EntryType == LedgerEntryTypeCredit && right.EntryType == LedgerEntryTypeDebit)) {
 		return ErrInvalidLedgerEntries
 	}
 	return nil

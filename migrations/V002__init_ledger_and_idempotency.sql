@@ -82,9 +82,6 @@ CREATE TABLE ledger_entries (
     -- Optional: Ensure wallet_id matches from_wallet or to_wallet in transfer
     -- This is a logical constraint (can be checked by application layer)
     -- For strict enforcement at DB level, use a CHECK with subquery (expensive)
-    -- Recommended: enforce at application layer instead
-    CONSTRAINT chk_ledger_timestamps
-        CHECK (created_at IS NOT NULL)
 );
 
 -- Indexes on Ledger Entries
@@ -104,6 +101,57 @@ CREATE INDEX idx_ledger_created_at
 CREATE INDEX idx_ledger_wallet_type
     ON ledger_entries(wallet_id, entry_type)
     INCLUDE (amount);  -- Include amount to enable index-only scans
+
+-- =====================================================================
+-- LEDGER BALANCE INTEGRITY TRIGGER
+-- =====================================================================
+-- Purpose:
+--   Enforce the double-entry bookkeeping invariant: for any given transfer,
+--   the sum of DEBIT amounts must equal the sum of CREDIT amounts.
+--
+-- Design Decisions:
+--
+-- CONSTRAINT TRIGGER:
+--   - Uses `CREATE CONSTRAINT TRIGGER` with `DEFERRABLE INITIALLY DEFERRED`.
+--   - This ensures the trigger function is executed at the end of the transaction,
+--     not immediately after each row operation.
+--   - This is crucial because DEBIT and CREDIT entries for a single transfer
+--     are inserted as separate rows within the same transaction.
+--   - The check only becomes valid once both entries are present.
+--
+-- FUNCTION LOGIC:
+--   - Queries `ledger_entries` for the `transfer_id` of the row being inserted/updated.
+--   - Counts entries and sums DEBIT/CREDIT amounts.
+--   - If exactly two entries exist (guaranteed one DEBIT, one CREDIT by `uq_transfer_entry_type`),
+--     it verifies that `debit_sum = credit_sum`.
+--   - If the balance is off, it raises an exception, causing the transaction to roll back.
+--
+CREATE OR REPLACE FUNCTION enforce_ledger_balance_integrity()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_debit_sum BIGINT;
+    v_credit_sum BIGINT;
+    v_entry_count INTEGER;
+BEGIN
+    SELECT
+        COUNT(*),
+        COALESCE(SUM(CASE WHEN entry_type = 'DEBIT' THEN amount ELSE 0 END), 0),
+        COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END), 0)
+    INTO v_entry_count, v_debit_sum, v_credit_sum
+    FROM ledger_entries
+    WHERE transfer_id = NEW.transfer_id; -- Always check based on the new/updated row's transfer_id
+
+    IF v_entry_count = 2 AND v_debit_sum <> v_credit_sum THEN
+        RAISE EXCEPTION 'Ledger entries for transfer_id % are unbalanced (debit: %, credit: %)', NEW.transfer_id, v_debit_sum, v_credit_sum;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE CONSTRAINT TRIGGER trg_enforce_ledger_balance
+AFTER INSERT OR UPDATE ON ledger_entries
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION enforce_ledger_balance_integrity();
 
 -- =====================================================================
 -- IDEMPOTENCY RECORDS TABLE
@@ -148,7 +196,7 @@ CREATE INDEX idx_ledger_wallet_type
 CREATE TABLE idempotency_records (
     -- Primary Key: Idempotency key from client
     idempotency_key TEXT PRIMARY KEY
-        CONSTRAINT chk_idempotency_key_not_empty CHECK (idempotency_key <> ''),
+        CONSTRAINT chk_idempotency_key_not_empty CHECK (length(idempotency_key) > 0),
 
     -- Transfer ID: Link to actual transfer created
     -- Can be NULL if transfer creation failed before ID was assigned
@@ -158,14 +206,14 @@ CREATE TABLE idempotency_records (
     -- Request Hash: SHA256 or similar of request body
     -- Used to detect if same key is re-used with different request payload
     request_hash TEXT NOT NULL
-        CONSTRAINT chk_request_hash_not_empty CHECK (request_hash <> ''),
+        CONSTRAINT chk_request_hash_not_empty CHECK (length(request_hash) > 0),
 
     -- Status of idempotency record
     -- PENDING: execution in progress or queued
     -- COMPLETED: transfer succeeded (response can be replayed)
     -- FAILED: transfer failed (error response can be replayed)
     status TEXT NOT NULL DEFAULT 'PENDING'
-        CONSTRAINT chk_idempotency_status
+        CONSTRAINT chk_idempotency_status_valid
             CHECK (status IN ('PENDING', 'COMPLETED', 'FAILED')),
 
     -- Stored Response: Full HTTP response as JSON
@@ -176,20 +224,18 @@ CREATE TABLE idempotency_records (
     -- HTTP Status Code: 200, 202, 422, 500, etc.
     -- Enables client to distinguish between success, client error, server error
     status_code INTEGER NOT NULL DEFAULT 0
-        CONSTRAINT chk_idempotency_status_code_positive
-            CHECK (status_code >= 100 AND status_code < 600),
+        CONSTRAINT chk_idempotency_status_code_range
+            CHECK (status_code = 0 OR (status_code >= 100 AND status_code < 600)),
 
     -- Audit Column
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Constraints
-    CONSTRAINT chk_idempotency_response_non_empty
-        CHECK (response_json <> '{}' OR status = 'PENDING'),
     CONSTRAINT chk_idempotency_status_consistency
         -- If COMPLETED or FAILED, must have status code and response
         CHECK (
-            (status = 'PENDING' AND (status_code = 0 OR response_json = '{}'))
-            OR (status IN ('COMPLETED', 'FAILED') AND status_code > 0)
+            (status = 'PENDING' AND status_code = 0)
+            OR (status IN ('COMPLETED', 'FAILED') AND status_code >= 100)
         )
 );
 

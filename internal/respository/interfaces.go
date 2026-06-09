@@ -77,6 +77,10 @@ type IdempotencyRecord struct {
 	ResponseJSON   []byte
 	StatusCode     int
 	CreatedAt      time.Time
+	// Actor metadata
+	CreatedBy string
+	CallerIP  string
+	UserAgent string
 }
 
 // IdempotencyRepository provides persistence for request deduplication.
@@ -90,4 +94,7 @@ type IdempotencyRepository interface {
 	GetByKey(ctx context.Context, idempotencyKey string) (*IdempotencyRecord, error)
 	UpdateResponse(ctx context.Context, idempotencyKey string, responseJSON []byte, statusCode int, status IdempotencyStatus) error
 	UpdateStatus(ctx context.Context, idempotencyKey string, status IdempotencyStatus) error
+	// CleanupPending transitions or removes stale PENDING records older than cutoff.
+	// Returns the number of records affected.
+	CleanupPending(ctx context.Context, cutoff time.Time) (int, error)
 }

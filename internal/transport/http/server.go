@@ -3,11 +3,12 @@ package transporthttp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +19,10 @@ import (
 )
 
 const (
-	correlationHeader = "X-Correlation-ID"
+	correlationHeader    = "X-Correlation-ID"
+	reconcileSuffix      = "/reconcile"
+	walletUrlSubPath     = "/wallets/"
+	MessageMetNotAllowed = "method not allowed"
 )
 
 type correlationIDKey struct{}
@@ -125,7 +129,7 @@ func (s *Server) handleWallets(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.handleCreateWallet(w, r)
 	default:
-		writeError(w, r.Context(), http.StatusMethodNotAllowed, "method not allowed", nil)
+		writeError(w, r.Context(), http.StatusMethodNotAllowed, MessageMetNotAllowed, nil)
 	}
 }
 
@@ -150,12 +154,12 @@ func (s *Server) handleGetWallet(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func (s *Server) handleWalletByID(w http.ResponseWriter, r *http.Request) {
-	if strings.HasSuffix(r.URL.Path, "/reconcile") {
+	if strings.HasSuffix(r.URL.Path, reconcileSuffix) {
 		if r.Method != http.MethodGet {
-			writeError(w, r.Context(), http.StatusMethodNotAllowed, "method not allowed", nil)
+			writeError(w, r.Context(), http.StatusMethodNotAllowed, MessageMetNotAllowed, nil)
 			return
 		}
-		id, ok := parseReconcileID(r.URL.Path, "/wallets/")
+		id, ok := parseReconcileID(r.URL.Path, walletUrlSubPath)
 		if !ok {
 			writeError(w, r.Context(), http.StatusBadRequest, "invalid wallet reconcile path", nil)
 			return
@@ -165,10 +169,10 @@ func (s *Server) handleWalletByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method != http.MethodGet {
-		writeError(w, r.Context(), http.StatusMethodNotAllowed, "method not allowed", nil)
+		writeError(w, r.Context(), http.StatusMethodNotAllowed, MessageMetNotAllowed, nil)
 		return
 	}
-	id, ok := parseID(r.URL.Path, "/wallets/")
+	id, ok := parseID(r.URL.Path, walletUrlSubPath)
 	if !ok {
 		writeError(w, r.Context(), http.StatusBadRequest, "invalid wallet id path", nil)
 		return
@@ -211,13 +215,37 @@ func (s *Server) handleCreateTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Compute canonical request hash server-side to avoid client mistakes.
+	canonical := map[string]interface{}{
+		"idempotencyKey": req.IdempotencyKey,
+		"fromWalletId":   req.FromWalletID,
+		"toWalletId":     req.ToWalletID,
+		"amount":         req.Amount,
+	}
+	canonicalJSON, _ := json.Marshal(canonical)
+	h := sha256.Sum256(canonicalJSON)
+	requestHash := hex.EncodeToString(h[:])
+
+	// capture actor metadata for idempotency records
+	createdBy := r.Header.Get("X-User")
+	callerIP := ""
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		callerIP = host
+	} else {
+		callerIP = r.RemoteAddr
+	}
+	userAgent := r.Header.Get("User-Agent")
+
 	transfer, err := s.transferService.Execute(r.Context(), application.TransferRequest{
-		TransferID:     req.TransferID,
+		TransferID:     req.TransferID, // service will generate if empty
 		IdempotencyKey: req.IdempotencyKey,
 		FromWalletID:   req.FromWalletID,
 		ToWalletID:     req.ToWalletID,
 		Amount:         req.Amount,
-		RequestHash:    req.RequestHash,
+		RequestHash:    requestHash,
+		CreatedBy:      createdBy,
+		CallerIP:       callerIP,
+		UserAgent:      userAgent,
 	})
 	if err != nil {
 		writeMappedError(w, r.Context(), err)
@@ -240,7 +268,7 @@ func (s *Server) handleTransfers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		s.handleCreateTransfer(w, r)
 	default:
-		writeError(w, r.Context(), http.StatusMethodNotAllowed, "method not allowed", nil)
+		writeError(w, r.Context(), http.StatusMethodNotAllowed, MessageMetNotAllowed, nil)
 	}
 }
 
@@ -275,7 +303,7 @@ func (s *Server) handleGetTransfer(w http.ResponseWriter, r *http.Request, id st
 
 func (s *Server) handleTransferByID(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeError(w, r.Context(), http.StatusMethodNotAllowed, "method not allowed", nil)
+		writeError(w, r.Context(), http.StatusMethodNotAllowed, MessageMetNotAllowed, nil)
 		return
 	}
 	id, ok := parseID(r.URL.Path, "/transfers/")
@@ -317,11 +345,11 @@ func parseID(path, prefix string) (string, bool) {
 }
 
 func parseReconcileID(path, prefix string) (string, bool) {
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, "/reconcile") {
+	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, reconcileSuffix) {
 		return "", false
 	}
 	trimmed := strings.TrimPrefix(path, prefix)
-	id := strings.TrimSuffix(trimmed, "/reconcile")
+	id := strings.TrimSuffix(trimmed, reconcileSuffix)
 	if id == "" || strings.Contains(id, "/") {
 		return "", false
 	}
@@ -333,17 +361,7 @@ func decodeJSON(r *http.Request, dest any) error {
 		return errors.New("request body is required")
 	}
 	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-	if len(body) == 0 {
-		return errors.New("request body is required")
-	}
-	if err := json.Unmarshal(body, dest); err != nil {
-		return err
-	}
-	return nil
+	return json.NewDecoder(r.Body).Decode(dest)
 }
 
 func writeJSON(w http.ResponseWriter, ctx context.Context, status int, payload any) {

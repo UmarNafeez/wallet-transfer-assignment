@@ -25,3 +25,7 @@ Use pessimistic locking on wallet rows during transfer execution, acquiring `SEL
   - Can increase lock contention under high concurrency.
   - Transaction duration must be kept short to avoid blocking.
   - Requires careful ordering and retry handling for deadlocks.
+
+## Implementation Status
+
+This ADR is implemented in the service: wallet updates are protected by `SELECT ... FOR UPDATE` acquired inside a short transaction. The repository retains a `version` column on `wallets` for possible future optimistic-locking, but the current critical transfer path uses pessimistic locking for simplicity, correctness, and predictable behavior under contention.

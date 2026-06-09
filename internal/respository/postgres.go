@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
 	"github.com/jackc/pgx/v5"
@@ -334,15 +335,24 @@ func (r *PostgresLedgerRepository) GetByWalletID(ctx context.Context, walletID s
 }
 
 func (r *PostgresIdempotencyRepository) Create(ctx context.Context, record *IdempotencyRecord) error {
+	var transferID interface{}
+	if record.TransferID == "" {
+		transferID = nil
+	} else {
+		transferID = record.TransferID
+	}
 	_, err := getConn(ctx, r.pool).Exec(ctx,
-		`INSERT INTO idempotency_records (idempotency_key, transfer_id, request_hash, status, response_json, status_code, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+		`INSERT INTO idempotency_records (idempotency_key, transfer_id, request_hash, status, response_json, status_code, created_at, created_by, caller_ip, user_agent)
+		 VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9)`,
 		record.IdempotencyKey,
-		record.TransferID,
+		transferID,
 		record.RequestHash,
 		string(record.Status),
 		record.ResponseJSON,
 		record.StatusCode,
+		record.CreatedBy,
+		record.CallerIP,
+		record.UserAgent,
 	)
 	return mapDBError(err)
 }
@@ -350,7 +360,7 @@ func (r *PostgresIdempotencyRepository) Create(ctx context.Context, record *Idem
 func (r *PostgresIdempotencyRepository) GetByKey(ctx context.Context, idempotencyKey string) (*IdempotencyRecord, error) {
 	var record IdempotencyRecord
 	err := getConn(ctx, r.pool).QueryRow(ctx,
-		`SELECT idempotency_key, transfer_id, request_hash, status, response_json, status_code, created_at
+		`SELECT idempotency_key, transfer_id, request_hash, status, response_json, status_code, created_at, created_by, caller_ip, user_agent
 		 FROM idempotency_records
 		 WHERE idempotency_key = $1`,
 		idempotencyKey,
@@ -362,6 +372,9 @@ func (r *PostgresIdempotencyRepository) GetByKey(ctx context.Context, idempotenc
 		&record.ResponseJSON,
 		&record.StatusCode,
 		&record.CreatedAt,
+		&record.CreatedBy,
+		&record.CallerIP,
+		&record.UserAgent,
 	)
 	if err != nil {
 		return nil, mapDBError(err)
@@ -405,4 +418,19 @@ func (r *PostgresIdempotencyRepository) UpdateStatus(ctx context.Context, idempo
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *PostgresIdempotencyRepository) CleanupPending(ctx context.Context, cutoff time.Time) (int, error) {
+	ct, err := getConn(ctx, r.pool).Exec(ctx,
+		`UPDATE idempotency_records
+		 SET status = $1, response_json = jsonb_build_object('error', 'stale idempotency claim'), status_code = 500
+		 WHERE status = $2 AND created_at < $3`,
+		string(IdempotencyStatusFailed),
+		string(IdempotencyStatusPending),
+		cutoff,
+	)
+	if err != nil {
+		return 0, mapDBError(err)
+	}
+	return int(ct.RowsAffected()), nil
 }

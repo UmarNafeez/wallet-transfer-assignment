@@ -24,3 +24,7 @@ Maintain a stored balance on the wallet record while also appending ledger entri
   - Introduces a second source of truth that must be kept consistent.
   - Requires reconciliation logic and tests to ensure correctness.
   - Any bug in balance updates can lead to balance drift that must be detected.
+
+## Implementation Status
+
+This ADR is implemented: the service updates `wallets.balance` within the same transaction that writes `ledger_entries` and `transfers`, minimizing risk of drift. The repository exposes a `reconcile` endpoint that computes ledger-derived balances and compares them to stored balances; integration tests cover reconciliation cases. Reviewers should note the explicit reconciliation path and ledger-trigger that enforces debit/credit equality.

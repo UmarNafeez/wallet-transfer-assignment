@@ -336,12 +336,10 @@ components:
     CreateTransferRequest:
       type: object
       required:
-        - transferId
-        - idempotencyKey
-        - fromWalletId
-        - toWalletId
-        - amount
-        - requestHash
+            - idempotencyKey
+            - fromWalletId
+            - toWalletId
+            - amount
       properties:
         transferId:
           type: string

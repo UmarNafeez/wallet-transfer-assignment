@@ -57,6 +57,42 @@ func main() {
 	addr := ":" + port
 
 	log.Printf("starting wallet transfer API on %s", addr)
+
+	// Background worker: cleanup stale PENDING idempotency records and publish metric
+	pendingTTL := 5 * time.Minute
+	cleanupInterval := 1 * time.Minute
+	if v := os.Getenv("IDEMPOTENCY_PENDING_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			pendingTTL = d
+		}
+	}
+	if v := os.Getenv("IDEMPOTENCY_CLEANUP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cleanupInterval = d
+		}
+	}
+
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				cutoff := time.Now().Add(-pendingTTL)
+				if n, err := idemRepo.CleanupPending(context.Background(), cutoff); err != nil {
+					log.Printf("idempotency cleanup failed: %v", err)
+				} else if n > 0 {
+					log.Printf("idempotency: marked %d stale PENDING records as FAILED", n)
+				}
+				// update metric with current pending count
+				var pendingCount int
+				_ = pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM idempotency_records WHERE status = $1`, "PENDING").Scan(&pendingCount)
+				metrics.SetIdempotencyPending(pendingCount)
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
