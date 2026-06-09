@@ -171,6 +171,8 @@ func (t *Transfer) Validate() error {
 	if t.FromWalletID == t.ToWalletID {
 		return ErrSameWalletIDs
 	}
+	// Staff Suggestion: Validate UUID format if applicable to prevent
+	// SQL injection or malformed business keys early.
 	if t.Amount <= 0 {
 		return ErrInvalidAmount
 	}
