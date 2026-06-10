@@ -1,8 +1,6 @@
 package domain
 
-import (
-	"errors"
-)
+import "errors"
 
 var (
 	ErrEmptyWalletID             = errors.New("wallet ID is required")
@@ -21,6 +19,11 @@ var (
 	ErrLedgerEntrySameWalletID   = errors.New("ledger entries must reference different wallets")
 	ErrLedgerEntryAmountMismatch = errors.New("ledger entries must have matching amounts")
 )
+
+func isValidUUID(id string) bool {
+	_, err := uuid.Parse(id)
+	return err == nil
+}
 
 // Metrics defines the interface for collecting system metrics.
 type Metrics interface {
@@ -101,6 +104,9 @@ func (w *Wallet) Validate() error {
 	if w.ID == "" {
 		return ErrEmptyWalletID
 	}
+	if !isValidUUID(w.ID) {
+		return ErrInvalidWalletIDFormat
+	}
 	if w.Balance < 0 {
 		return ErrNegativeBalance
 	}
@@ -168,11 +174,12 @@ func (t *Transfer) Validate() error {
 	if t.FromWalletID == "" || t.ToWalletID == "" {
 		return ErrInvalidWalletID
 	}
+	if !isValidUUID(t.FromWalletID) || !isValidUUID(t.ToWalletID) {
+		return ErrInvalidWalletIDFormat
+	}
 	if t.FromWalletID == t.ToWalletID {
 		return ErrSameWalletIDs
 	}
-	// Staff Suggestion: Validate UUID format if applicable to prevent
-	// SQL injection or malformed business keys early.
 	if t.Amount <= 0 {
 		return ErrInvalidAmount
 	}
