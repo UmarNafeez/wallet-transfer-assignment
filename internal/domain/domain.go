@@ -20,11 +20,6 @@ var (
 	ErrLedgerEntryAmountMismatch = errors.New("ledger entries must have matching amounts")
 )
 
-func isValidUUID(id string) bool {
-	_, err := uuid.Parse(id)
-	return err == nil
-}
-
 // Metrics defines the interface for collecting system metrics.
 type Metrics interface {
 	IncRequest(method, route string, status int)
@@ -104,9 +99,6 @@ func (w *Wallet) Validate() error {
 	if w.ID == "" {
 		return ErrEmptyWalletID
 	}
-	if !isValidUUID(w.ID) {
-		return ErrInvalidWalletIDFormat
-	}
 	if w.Balance < 0 {
 		return ErrNegativeBalance
 	}
@@ -173,9 +165,6 @@ func (t *Transfer) Validate() error {
 	}
 	if t.FromWalletID == "" || t.ToWalletID == "" {
 		return ErrInvalidWalletID
-	}
-	if !isValidUUID(t.FromWalletID) || !isValidUUID(t.ToWalletID) {
-		return ErrInvalidWalletIDFormat
 	}
 	if t.FromWalletID == t.ToWalletID {
 		return ErrSameWalletIDs
