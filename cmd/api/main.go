@@ -48,7 +48,7 @@ func main() {
 	mux := http.NewServeMux()
 	server.RegisterRoutes(mux)
 	mux.Handle("/metrics", promhttp.HandlerFor(metrics.Registry(), promhttp.HandlerOpts{}))
-	handler := observability.HTTPMiddleware(logger, metrics)(transporthttp.WithCorrelationID(mux))
+	handler := transporthttp.WithCorrelationID(observability.HTTPMiddleware(logger, metrics)(mux))
 
 	port := os.Getenv("PORT")
 	if port == "" {

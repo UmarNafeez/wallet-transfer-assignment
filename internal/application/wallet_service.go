@@ -7,6 +7,7 @@ import (
 
 	"github.com/Robustrade/wallet-transfer-assignment/internal/domain"
 	repository "github.com/Robustrade/wallet-transfer-assignment/internal/respository"
+	"github.com/google/uuid"
 )
 
 type WalletService struct {
@@ -20,7 +21,11 @@ func NewWalletService(walletRepo repository.WalletRepository, ledgerRepo reposit
 
 func (s *WalletService) Create(ctx context.Context, id string, balance int64) (*domain.Wallet, error) {
 	if id == "" {
-		return nil, domain.ErrEmptyWalletID
+		id = uuid.NewString()
+	} else {
+		if _, err := uuid.Parse(id); err != nil {
+			return nil, domain.ErrInvalidWalletIDFormat
+		}
 	}
 	wallet, err := domain.NewWallet(id, balance)
 	if err != nil {
@@ -38,6 +43,9 @@ func (s *WalletService) Create(ctx context.Context, id string, balance int64) (*
 func (s *WalletService) Get(ctx context.Context, id string) (*domain.Wallet, error) {
 	if id == "" {
 		return nil, domain.ErrEmptyWalletID
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, domain.ErrInvalidWalletIDFormat
 	}
 	return s.walletRepo.GetByID(ctx, id)
 }

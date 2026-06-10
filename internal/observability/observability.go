@@ -153,12 +153,16 @@ func HTTPMiddleware(logger *slog.Logger, metrics *Metrics) func(http.Handler) ht
 				}
 			}
 			if logger != nil {
+				correlationID := rw.Header().Get(correlationHeader)
+				if correlationID == "" {
+					correlationID = r.Header.Get(correlationHeader)
+				}
 				logger.Info("http_request",
 					slog.String("method", r.Method),
 					slog.String("route", route),
 					slog.Int("status", rw.statusCode),
 					slog.Float64("duration_seconds", duration),
-					slog.String("correlation_id", r.Header.Get(correlationHeader)),
+					slog.String("correlation_id", correlationID),
 				)
 			}
 		})

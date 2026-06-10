@@ -8,5 +8,5 @@ import "embed"
 // Use it with db.Migrate to apply migrations from any environment without
 // needing the migration files on disk at runtime.
 //
-//go:embed *_init_*.sql
+//go:embed *.sql
 var FS embed.FS

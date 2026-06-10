@@ -1,9 +1,14 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/google/uuid"
+)
 
 var (
 	ErrEmptyWalletID             = errors.New("wallet ID is required")
+	ErrInvalidWalletIDFormat     = errors.New("wallet ID must be a valid UUID")
 	ErrNegativeBalance           = errors.New("wallet balance must be non-negative")
 	ErrInvalidAmount             = errors.New("amount must be greater than zero")
 	ErrInsufficientFunds         = errors.New("insufficient funds")
@@ -18,6 +23,11 @@ var (
 	ErrLedgerEntrySameWalletID   = errors.New("ledger entries must reference different wallets")
 	ErrLedgerEntryAmountMismatch = errors.New("ledger entries must have matching amounts")
 )
+
+func isValidUUID(id string) bool {
+	_, err := uuid.Parse(id)
+	return err == nil
+}
 
 // Metrics defines the interface for collecting system metrics.
 type Metrics interface {
@@ -98,6 +108,9 @@ func (w *Wallet) Validate() error {
 	if w.ID == "" {
 		return ErrEmptyWalletID
 	}
+	if !isValidUUID(w.ID) {
+		return ErrInvalidWalletIDFormat
+	}
 	if w.Balance < 0 {
 		return ErrNegativeBalance
 	}
@@ -165,11 +178,12 @@ func (t *Transfer) Validate() error {
 	if t.FromWalletID == "" || t.ToWalletID == "" {
 		return ErrInvalidWalletID
 	}
+	if !isValidUUID(t.FromWalletID) || !isValidUUID(t.ToWalletID) {
+		return ErrInvalidWalletIDFormat
+	}
 	if t.FromWalletID == t.ToWalletID {
 		return ErrSameWalletIDs
 	}
-	// Staff Suggestion: Validate UUID format if applicable to prevent
-	// SQL injection or malformed business keys early.
 	if t.Amount <= 0 {
 		return ErrInvalidAmount
 	}

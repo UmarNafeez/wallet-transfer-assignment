@@ -403,6 +403,7 @@ func mapErrorToStatus(err error) int {
 		errors.Is(err, domain.ErrNegativeBalance),
 		errors.Is(err, domain.ErrInvalidAmount),
 		errors.Is(err, domain.ErrInvalidWalletID),
+		errors.Is(err, domain.ErrInvalidWalletIDFormat),
 		errors.Is(err, domain.ErrSameWalletIDs),
 		errors.Is(err, domain.ErrInvalidTransferStatus),
 		errors.Is(err, domain.ErrInvalidLedgerEntryType),
